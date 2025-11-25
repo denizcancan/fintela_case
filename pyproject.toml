@@ -1,0 +1,42 @@
+[project]
+name        = "case-study"
+version     = "0.0.1"
+description = "Case study for Fintela"
+requires-python = ">=3.12"
+readme = "README.md"
+dependencies = [
+    "beautifulsoup4>=4.12.3",
+    "sqlalchemy>=2.0.35",
+    "psycopg2-binary>=2.9.9",
+    "pytz>=2024.2",
+    "python-dotenv>=1.0.1",
+    "setuptools>=75.1.0",
+    "retry>=0.9.2",
+    "tefas-crawler==0.5.0",
+    # Add any if necessary
+    "dagster",
+    "dagster-webserver",
+    "dagster-dg-cli",
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+]
+
+authors = [
+]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.dg]
+directory_type = "project"
+
+[tool.dg.project]
+root_module = "case_study"
+
+# Define the private index itself
+[[tool.uv.index]]
+name    = "fintela"
+url     = "https://us-central1-python.pkg.dev/tribal-flux-430621-q7/fintela-pi/simple/"
+explicit = true   # keep other packages on PyPI unless explicitly pinned
+

@@ -1,0 +1,114 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:14-alpine
+    container_name: fintela-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fintela}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintela_password}
+      POSTGRES_DB: ${POSTGRES_DB:-fintela}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./portfolios.sql:/docker-entrypoint-initdb.d/01-portfolios.sql:ro
+      - ./risk_scores.sql:/docker-entrypoint-initdb.d/02-risk_scores.sql:ro
+      - ./extra_indexes.sql:/docker-entrypoint-initdb.d/03-extra_indexes.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fintela}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fintela-network
+
+  fastapi:
+    build:
+      context: .
+      dockerfile: Dockerfile.fastapi
+    container_name: fintela-api
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-fintela}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintela_password}
+      POSTGRES_DB: ${POSTGRES_DB:-fintela}
+    ports:
+      - "${FASTAPI_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - fintela-network
+    restart: unless-stopped
+
+  dagster:
+    build:
+      context: .
+      dockerfile: Dockerfile.dagster
+    container_name: fintela-dagster
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-fintela}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintela_password}
+      POSTGRES_DB: ${POSTGRES_DB:-fintela}
+      DAGSTER_HOME: /app/dagster_home
+    volumes:
+      - dagster_home:/app/dagster_home
+    ports:
+      - "${DAGSTER_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - fintela-network
+    restart: unless-stopped
+
+  dagster-daemon:
+    build:
+      context: .
+      dockerfile: Dockerfile.dagster
+    container_name: fintela-dagster-daemon
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-fintela}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintela_password}
+      POSTGRES_DB: ${POSTGRES_DB:-fintela}
+      DAGSTER_HOME: /app/dagster_home
+    volumes:
+      - dagster_home:/app/dagster_home
+    command: ["uv", "run", "dagster-daemon", "run", "-m", "case_study.definitions"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dagster:
+        condition: service_started
+    networks:
+      - fintela-network
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: fintela-dashboard
+    ports:
+      - "${DASHBOARD_PORT:-5173}:80"
+    depends_on:
+      - fastapi
+    networks:
+      - fintela-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  dagster_home:
+    driver: local
+
+networks:
+  fintela-network:
+    driver: bridge
