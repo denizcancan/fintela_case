@@ -39,7 +39,7 @@ try:
         
         if count > 0:
             print(f"✅ fund_labels already has {count} records. Skipping CSV load.")
-            print("   To reload, delete the table first or use if_exists='replace' in the script.")
+            print("   To reload, delete the table first.")
             sys.exit(0)
 except Exception as e:
     print(f"⚠️  Could not check fund_labels table: {e}")
@@ -61,11 +61,13 @@ print(f"Loaded {len(df)} records from CSV")
 print(f"Columns: {df.columns.tolist()}")
 
 # Load into database
+# Note: if_exists='replace' is safe here because we already checked for existing data above
+# If data exists, we exit early. This only runs if table is empty or doesn't exist.
 print(f"\nLoading into database...")
 df.to_sql(
     'fund_labels',
     engine,
-    if_exists='replace',  # Replace existing data
+    if_exists='replace',  # Safe: we exit early if data already exists
     index=False,
     method='multi'
 )

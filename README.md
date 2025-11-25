@@ -21,8 +21,16 @@ A system for processing Turkish fund data, managing investment portfolios, and c
 git clone <repository-url>
 cd fintela-swe-case
 
-# Run setup script (creates .env, starts Docker, loads data)
+# Make setup script executable (if needed)
+chmod +x scripts/setup.sh
+
+# Run setup script (starts Docker, loads data)
 ./scripts/setup.sh
+```
+
+**Note**: If you get a "Permission denied" error, you can also run:
+```bash
+bash scripts/setup.sh
 ```
 
 That's it! All services will be running:

@@ -24,7 +24,7 @@ echo "⏳ Waiting for PostgreSQL to be ready..."
 max_attempts=30
 attempt=0
 while [ $attempt -lt $max_attempts ]; do
-    if docker compose exec -T postgres pg_isready -U fintela > /dev/null 2>&1; then
+    if docker compose exec -T postgres pg_isready -U ${POSTGRES_USER:-fintela} > /dev/null 2>&1; then
         echo "✅ PostgreSQL is ready!"
         break
     fi
