@@ -1,22 +1,8 @@
----
+# Fintela Case Study
 
-Your task is to design and implement a small system that processes Turkish fund data, manages investment portfolios, and computes analytical metrics (risk & performance) using data pipelines.
+A system for processing Turkish fund data, managing investment portfolios, and computing analytical metrics (risk & performance) using data pipelines.
 
----
-
-You will build:
-
-1. **A Dagster data ingestion pipeline (**[https://docs.dagster.io](https://docs.dagster.io/)**)**
-    
-    Ingest Turkish fund data to PostgreSQL.
-    
-2. **A FastAPI service (**[https://fastapi.tiangolo.com](https://fastapi.tiangolo.com/)**)**
-    
-    CRUD for portfolios (group of funds) + risk and alert endpoints.
-    
-3. **Two analytics pipelines in Dagster**
-    - Portfolio risk calculation
-    - Fund performance evaluation
+> 📖 **For detailed architecture and design decisions, see [ARCHITECTURE.md](./ARCHITECTURE.md)**
 
 ---
 
@@ -48,25 +34,25 @@ That's it! All services will be running:
 
 If you prefer to set up manually:
 
-1. **Create `.env` file** (copy from `.env.example`):
-   ```bash
-   cp .env.example .env
-   ```
 
-2. **Start Docker services**:
+1. **Start Docker services**:
    ```bash
    docker-compose up -d
    ```
 
-3. **Load fund_labels CSV**:
+2. **Load fund_labels CSV**:
    ```bash
    uv run python scripts/init_db.py
    ```
 
-4. **Create test portfolios** (optional):
+3. **Create test portfolios** (optional):
    ```bash
    uv run python create_test_portfolios.py
    ```
+
+---
+
+
 
 ## Database Tables
 
@@ -112,156 +98,85 @@ If you have PostgreSQL installed locally:
    ```
 
 ---
+## Design Philosophy & Thinking Process
+İlk olarak Dagster dokümantasyonunu baştan sona okudum. Asset yapısı, dependencies, resources nasıl çalışıyor hepsini anlamam gerekti. Sonra README’nin kalan kısmına baktım, benden tam olarak ne istendiğini netleştirdim.
 
-# **1. Background & Scenario**
+Analitik tarafa geçince, ilk versiyonda portföy riskini tamamen volatility (std) üzerinden hesaplıyordum. Çalışıyordu ama içime pek sinmedi; biraz yüzeysel kalıyordu. Sadece günlük oynaklığa bakmak bana çok tek boyutlu geldi. Vaktim de olduğu için daha mantıklı bir risk modeli kurmak istedim.
 
-Fintela works with Turkish asset managers who invest in a universe of funds.
+Konu üzerinde araştırınca Markowitz ve CAPM ile karşılaştım. CAPM bu proje için baya “overkill” duruyordu (benchmark, beta vs. gerektiriyor), o yüzden onu es geçtim. Ama Markowitz’nin portföy yaklaşımı hoşuma gitti. Komple Markowitz çözmek yerine, elimdeki verilere uygun, daha hafif bir versiyon (Markowitz-lite) uygulayabileceğimi gördüm.
 
-They need a system that:
+Sonunda risk modelimi şu dört parçadan oluşturdum:
 
-- Loads daily updated fund data (prices, category, instrument distribution)
-- Allows definition of portfolios of funds (e.g. 25% FUNDX, 50% FUNDY, 25% FUNDZ)
-- Computes portfolio risks daily
-- Detects unusual behavior in individual funds
-- Exposes results through a REST API
+Kovaryans tabanlı portföy volatilitesi (ana risk metriği)
 
----
+Herfindahl indeksinden türetilmiş konsantrasyon cezası
 
-# **2. Requirements**
+Maksimum drawdown (portföyün gördüğü en kötü düşüş)
 
-Below is the assignment in three parts. Both Dagster and FastAPI is python based, so Python is required. 
-Also, please use virtual environemnts and uv as the package manager. (https://docs.astral.sh/uv/)
+Likidite cezası (market cap + investor count’tan hesapladığım liquidity score)
 
-Use PostgreSQL as the target database of the dagster jobs, as well as the operational db that the FastAPI service uses.
+Bunların hepsini normalize edip ağırlıklandırarak tek bir risk_score ürettim. Böylece risk artık sadece oynaklıktan ibaret olmuyor; portföy dağılımı, düşüş davranışı ve fonların likiditesi de hesaba katılmış oluyor.
 
----
+Risk tarafını oturttuktan sonra sıra fon performansına geldi. İlk yaptığım yaklaşım çok basitti:
+90 günlük cumulative return alıp aynı kategorideki fonlarla kıyaslayıp percentile hesaplıyordum.
+Bu çalışıyordu ama bazı problemleri vardı:
 
-## **2.1 Part A — Data Ingestion (Dagster)**
+Sadece getiriyi ölçmek risk-adjusted değil (yüksek oynak fonlar yanlış şekilde iyi görünüyordu).
 
-### **Your task**
+Kategoriler bazen çok küçük (3 fon gibi) → percentile güvenilmez.
 
-Build a Dagster job that:
+Outlier fonlar yüzünden dağılım bozuluyordu → yanlış poor-performer alarmı çıkıyordu.
 
-- Gets the data from the TEFAS website
-- Parses fund, price, and instrument distribution data
-- Upserts into PostgreSQL (idempotent)
+Bunu iyileştirmek için daha mantıklı bir metrik oluşturmaya karar verdim.
 
-> The fixed information about the funds are given with a csv under `data` folder, you can put that once to PostgreSQL to use in backend later. No need to write a job for the CSV. 
----
+Araştırma ve İyileştirme
 
-## **2.2 Part B — Portfolio Service (FastAPI)**
+Markowitz'i risk tarafında kullanmıştım, performans tarafında da Sharpe Ratio mantığına bakmaya başladım. Ama gerçek Sharpe yapmak için risk-free rate vs. gerekiyor. O yüzden daha basit bir şey yaptım:
 
-You will build a REST service that manages portfolios and exposes analytics. After building the service, create 50+ portfolios to use in the next step.
+Yeni Performans Modelim
+Her fon için:
+90 günlük total_return (bileşik getiri)
 
-### **Endpoints to implement**
+90 günlük volatility
 
-### **1. POST /portfolios**
+sharpe_like = return / volatility
 
-Create a portfolio with positions:
+→ Yani “risk başına getiriyi” hesaplamış oldum.
 
-```
-{
-	"id" : 1,
-  "positions": [
-    { "fund_code": "FUNDX", "weight": 0.25 },
-    { "fund_code": "FUNDY", "weight": 0.50 },
-    { "fund_code": "FUNDZ", "weight": 0.25 }
-  ]
-}
-```
+Sonra peer karşılaştırması için biraz daha akıllı bir mantık getirdim:
 
-### **2. GET /portfolios**
+Önce category içinde kıyasla (yeterince büyükse)
 
-List all portfolios 
+Değilse main_category seviyesine çık
 
-### **3. GET /portfolios/{id}**
+O da olmazsa tüm fonlarla kıyasla (fallback)
 
-Return portfolio + positions.
+Böylece kategori küçükse saçma percentile çıkmıyor.
 
-### **4. PUT /portfolios/{id}**
+Ek olarak, outlier’ları düzeltmek için robust bir metrik ekledim:
 
-Update name, positions.
+category içindeki median
 
-### **5. DELETE /portfolios/{id}**
+MAD (median absolute deviation)
 
-Delete portfolio
+robust z-score
 
----
+Poor performer işaretlemek için iki koşulu birlikte kullandım:
 
-### **Risk & Alert Endpoints**
+performance_score ≤ 0.10 (percentile)
 
-### **GET /portfolios/{id}/risk**
+z-score ≤ -1.5 (gerçekten akranlarından belirgin şekilde kötü)
 
-Returns latest risk:
+Bu ikili sayesinde sistem artık çok daha “temiz” ve spam’siz alert üretiyor.
 
-```json
-{
-  "portfolio_id": 1,
-  "risk_score": 0.92,
-  "risk": "HIGH"
-}
-```
+Sonuç
 
-### **GET /alerts/portfolios**
+Yeni model önceki modele göre daha tutarlı:
 
-Returns all portfolios with "HIGH" risk.
+Yüksek oynak ama şansa iyi getiri yapmış fonlar artık “iyi” görünmüyor.
 
-```json
-[{
-  "portfolio_id": 1,
-  "risk_score": 0.92,
-  "risk": "HIGH"
-},
-{
-  "portfolio_id": 2,
-  "risk_score": 0.04,
-  "risk": "LOW"
-}
-]
-```
+Çok düşük oynak ama hafif negatif getiri yapan fonlar gereksiz yere kötü görünmüyor.
 
-### **GET /alerts/funds**
+Poor performer’lar daha az ama daha “gerçek” oluyor.
 
-Returns funds that performs significantly bad compared to their peers.
-
-```json
-[{
-  "fund_code": "ABC",
-  "confidence": 0.89 // optional, confidence or a numeric value that signifies the strength of the change
-}]
-```
-
----
-
-## **2.3 Part C — Analytics Pipelines (Dagster)**
-
-You will build two jobs:
-
-- portfolio_risk_job
-- fund_performance_job
-
----
-
-# **3. Analytics Specifications**
-
-In this part, calculate quantitative metrics about the funds and  the portfolios. The calculations will be done with dagster jobs. The following definitions are somewhat vague but its intentional. There is not a single correct way of calculating those, also this  part is the open-ended, thought-provoking portion of the project that might be a little bit more fun then the rest. 
-
-## **3.1 Portfolio Risk**
-
-Fetch at least 180 trading days of prices for each fund (some may have less) for calculating a statistical “riskiness score”
-
-You are free to come up with a measure of riskiness as long as it can be classified as LOW, MEDIUM or HIGH.
-
----
-
-## **3.2 Fund Performance**
-
-For each fund calculate how the fund is performing according to its peers and identify poor performers. Its peers can be understood as the funds with same category, similar asset distribution or any other method. One important consideration is that not producing many alerts.  
-
----
-
-### **Optional but appreciated**
-
-- README to document your approaches and thinking process in software design and analytics.
-- Docker Compose setup
-- Postman collection
+Fund performance score artık sadece getiriyi değil, risk-adjusted performansı yansıtıyor.
